@@ -1,0 +1,74 @@
+# 图像恢复测试配置；CLaRMambaModel 使用重叠分块推理。
+# 当前各测试条目使用相同图像目录，name 仅是结果标签。
+name: test_CLaRMamba_BDE
+model_type: CLaRMambaModel  # 训练/测试封装类，定义于 models/clarmamba_model.py。
+scale: 1  # 输出与输入的空间倍率；当前为 1。
+num_gpu: 1
+manual_seed: 10
+
+datasets:
+  test_1:
+    name: BDE
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_test_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_test_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+  test_3:
+    name: Sintel_ours
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_test_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_test_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+
+  test_4:
+    name: FIVE-K_ours
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_test_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_test_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+
+  test_5:
+    name: SAMPLING
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_test_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_test_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+
+network_g:
+  type: CLaRMamba
+  upscale: 1  # 当前恢复路径保持输入尺寸。
+  in_chans: 3
+  img_size: 64  # 构造时记录的空间尺寸；forward 使用实际输入尺寸。
+  img_range: 1.  # 网络内部减均值后的缩放系数。
+  d_state: 16  # 组级配置；当前 CLRGBlocks 未传入子模块，SSM 使用默认值 16。
+  depths: [1,1,1,1]  # 每组 CNN + DGPMB 组合的重复次数；列表长度为组数。
+  embed_dim: 64  # 浅层及组级特征通道；内部子模块当前按 64 通道构造。
+  mlp_ratio: 2  # 组级配置；当前 CLRGBlocks 未传入子模块。
+  upsampler: ''  # 当前配置使用同尺寸恢复输出层。
+  resi_connection: '1conv'  # 组末卷积形式；当前 CLRG.forward 不加组级输入残差。
+
+path:
+  pretrain_network_g: ./experiments/CLaRMamba_BDE/models/net_g_105000.pth  # 测试时加载此权重文件。
+  strict_load_g: true  # 严格检查加载权重的参数键与形状。
+
+val:
+  save_img: true  # 保存恢复后的图像。
+  suffix: ~  # 空值表示保存图像时使用实验名作后缀。
+
+  metrics:
+    psnr:
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false  # false 表示直接在图像通道上计算指标。
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false  # false 表示直接在图像通道上计算指标。

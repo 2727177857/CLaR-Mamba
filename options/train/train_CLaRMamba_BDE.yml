@@ -1,0 +1,95 @@
+# 图像恢复训练配置；输入低质量图像与目标图像已在磁盘上配对。
+# train.py 读取此配置，CLaRMambaModel 通过 network_g 构造 CLaRMamba。
+name: CLaRMamba_BDE
+model_type: CLaRMambaModel  # 训练/测试封装类，定义于 models/clarmamba_model.py。
+scale: 1  # 输出与输入的空间倍率；当前为 1。
+num_gpu: 1
+manual_seed: 10
+
+datasets:
+  train:
+    task: BDE
+    name: SINTEL_FIVEK
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_train_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_train_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+
+    gt_size: 96  # 训练时成对随机裁剪为 96×96。
+    use_hflip: true
+    use_rot: true
+
+    use_shuffle: true
+    num_worker_per_gpu: 32  # 每个 GPU 的数据加载工作进程数。
+    batch_size_per_gpu: 2  # 每个 GPU 每批 2 对图像。
+    dataset_enlarge_ratio: 100  # 采样器的数据集扩展倍数。
+    prefetch_mode: ~  # 空值表示不启用专用预取模式。
+
+  val:
+    name: FIVE-K
+    type: PairedImageDataset
+    dataroot_gt: ./datasets/SINTEL_valid_HR  # 配对目标图像目录；实际文件格式与位深需由数据确定。
+    dataroot_lq: ./datasets/SINTEL_valid_LR/1bit  # 预先准备的低质量输入图像目录。
+    filename_tmpl: '{}'  # 配对文件名模板。
+    io_backend:
+      type: disk
+
+network_g:
+  type: CLaRMamba
+  upscale: 1  # 当前恢复路径保持输入尺寸。
+  in_chans: 3
+  img_size: 96  # 构造时记录的空间尺寸；forward 使用实际输入尺寸。
+  img_range: 1.  # 网络内部减均值后的缩放系数。
+  d_state: 16  # 组级配置；当前 CLRGBlocks 未传入子模块，SSM 使用默认值 16。
+  depths: [1,1,1,1]  # 每组 CNN + DGPMB 组合的重复次数；列表长度为组数。
+  embed_dim: 64  # 浅层及组级特征通道；内部子模块当前按 64 通道构造。
+  mlp_ratio: 2  # 组级配置；当前 CLRGBlocks 未传入子模块。
+  upsampler: None  # 当前配置使用同尺寸恢复输出层。
+  resi_connection: '1conv'  # 组末卷积形式；当前 CLRG.forward 不加组级输入残差。
+
+path:
+  pretrain_network_g: ~  # 空值表示不加载预训练网络权重。
+  strict_load_g: true  # 严格检查加载权重的参数键与形状。
+  resume_state: ~  # 空值表示不恢复训练状态。
+
+train:
+  optim_g:
+    type: Adam
+    lr: !!float 2e-4  # Adam 初始学习率为 0.0002。
+    weight_decay: 0  # 当前不使用权重衰减。
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: MultiStepLR
+    milestones: [250000, 400000, 450000, 475000]  # 在这些迭代节点调整学习率。
+    gamma: 0.5  # 每次调整将学习率乘以 0.5。
+
+  total_iter: 500000  # 训练总迭代次数为 500000。
+  warmup_iter: -1  # -1 表示不启用学习率预热。
+
+  pixel_opt:  # 预测图像与目标图像之间的 L1 像素损失。
+    type: L1Loss
+    loss_weight: 1.0
+    reduction: mean
+val:
+  val_freq: 200  # 每 200 次迭代执行一次验证。
+  save_img: true  # 保存恢复后的图像。
+
+  metrics:
+    psnr:
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false  # false 表示直接在图像通道上计算指标。
+logger:
+  print_freq: 200  # 每 200 次迭代输出训练日志。
+  save_checkpoint_freq: !!float 5e3  # 每 5000 次迭代保存检查点。
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+dist_params:  # 分布式模式使用的通信参数。
+  backend: nccl
+  port: 29500
